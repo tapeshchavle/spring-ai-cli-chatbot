@@ -8,6 +8,7 @@ import org.springframework.ai.chat.client.advisor.QuestionAnswerAdvisor;
 import org.springframework.ai.chat.memory.InMemoryChatMemory;
 import org.springframework.ai.reader.pdf.PagePdfDocumentReader;
 import org.springframework.ai.transformer.splitter.TokenTextSplitter;
+import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.CommandLineRunner;
@@ -24,31 +25,46 @@ public class Application {
 		SpringApplication.run(Application.class, args);
 	}
 
+	public Application(VectorStore vectorStore,
+		@Value("classpath:rag/wikipedia-hurricane-milton.pdf") Resource hurricaneMilton,
+		@Value("classpath:rag/wikipedia-atlantic-hurricane.pdf") Resource hurricane,
+		@Value("classpath:rag/wikipedia-tropical-cyclone.pdf") Resource cyclone) {
+		
+		// 1. Load the PDF documents into the vector store
+		vectorStore.add(new TokenTextSplitter().split(new PagePdfDocumentReader(hurricaneMilton).read()));
+		// vectorStore.add(new TokenTextSplitter().split(new PagePdfDocumentReader(hurricane).read()));
+		// vectorStore.add(new TokenTextSplitter().split(new PagePdfDocumentReader(cyclone).read()));
+	}
+
+	public static final String ANSI_RESET = "\u001B[0m";
+	public static final String ANSI_BOLD = "\u001B[1m";
+	public static final String ANSI_YELLOW = "\u001B[33m";
+
 	@Bean	
-	public CommandLineRunner cli(@Value("classpath:wikipedia-hurricane-milton-page.pdf") Resource hurricaneDocs,
-			ChatClient.Builder chatClientBuilder, VectorStore vectorStore) {
+	public CommandLineRunner cli(ChatClient.Builder chatClientBuilder, VectorStore vectorStore) {
 
 		return args -> {
 
-			// 1. Load the hurricane documents in vector store
-			vectorStore.add(new TokenTextSplitter().split(new PagePdfDocumentReader(hurricaneDocs).read()));
+			SearchRequest searchRequest = SearchRequest.defaults()
+				// .withSimilarityThreshold(0.)
+				.withTopK(3);
 
 			// 2. Create the ChatClient with chat memory and RAG support
 			var chatClient = chatClientBuilder
-				.defaultSystem("You are useful assistant, expert in hurricanes.") // Set the system prompt
+				.defaultSystem("You are useful assistant, expert in hurricanes. Be friendly")
 				.defaultAdvisors(new MessageChatMemoryAdvisor(new InMemoryChatMemory())) // Enable chat memory
-				.defaultAdvisors(new QuestionAnswerAdvisor(vectorStore)) // Enable RAG
+				.defaultAdvisors(new QuestionAnswerAdvisor(vectorStore, searchRequest)) // Enable RAG
 				.build();
 
 			// 3. Start the chat loop
 			System.out.println("\nI am your Hurricane Milton assistant.\n");
 			try (Scanner scanner = new Scanner(System.in)) {
 				while (true) {
-					System.out.print("\nUSER: ");
-					System.out.println("\nASSISTANT: " + 
+					System.out.print("\n" + ANSI_YELLOW + "USER: " + ANSI_RESET);
+					System.out.println("\n" + ANSI_YELLOW + "ASSISTANT: " + ANSI_RESET +
 						chatClient.prompt(scanner.nextLine()) // Get the user input
 							.call()
-							.content());
+							.content());				
 				}
 			}
 		};
